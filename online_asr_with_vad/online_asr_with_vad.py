@@ -55,8 +55,9 @@ async def mic_stream():
     speech_histories = []
     max_history = 3000  # 30 seconds
     check_history = 200  # 2 seconds
-    speech_threshold = int(check_history * 0.8)
-    background_threshold = int(check_history * 0.4)
+    min_history_for_decision = 20  # 200 ms
+    speech_ratio_threshold = 0.8
+    background_ratio_threshold = 0.4
 
     audio = np.zeros((160 * max_history), dtype=np.int16)
     model = whisper.load_model("base")
@@ -91,14 +92,18 @@ async def mic_stream():
         text = vad.transcribe(signal)
 
         # copy to buffer
-        audio[speech_count * lenght : (speech_count + 1) * lenght] = signal
+        write_index = min(speech_count, max_history - 1)
+        audio[write_index * lenght : (write_index + 1) * lenght] = signal
 
         print(datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3], text[0])
         speech_histories.append(text[0])
         if len(speech_histories) > check_history:
             del speech_histories[0]
-        else:
-            continue
+        history_len = len(speech_histories)
+        speech_count_in_history = speech_histories.count(1)
+        background_count_in_history = speech_histories.count(0)
+        speech_threshold = int(history_len * speech_ratio_threshold)
+        background_threshold = int(history_len * background_ratio_threshold)
 
         # Speaking and 30 seconds have passed
         if is_speech and speech_count >= max_history:
@@ -109,23 +114,30 @@ async def mic_stream():
         elif text[0] == 1:
             speech_count += 1
 
-            if not is_speech and speech_histories.count(1) > speech_threshold:
+            if (
+                not is_speech
+                and history_len >= min_history_for_decision
+                and speech_count_in_history > speech_threshold
+            ):
                 is_speech = True
                 print(
                     datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
                     "detect speech {} / {}".format(
-                        speech_histories.count(1), len(speech_histories)
+                        speech_count_in_history, history_len
                     ),
                 )
 
         # background
         else:
-            if speech_histories.count(0) > background_threshold:
+            if (
+                history_len >= min_history_for_decision
+                and background_count_in_history > background_threshold
+            ):
                 if is_speech:
                     print(
                         datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
                         "detect background and transcribe. {} / {}".format(
-                            speech_histories.count(0), len(speech_histories)
+                            background_count_in_history, history_len
                         ),
                     )
 
@@ -138,11 +150,13 @@ async def mic_stream():
                 is_speech = False
 
         if do_decode:
-            audio = audio.flatten().astype(np.float32) / 32768.0
-            audio = whisper.pad_or_trim(audio)
-            mel = whisper.log_mel_spectrogram(audio).to(model.device)
-            result = whisper.decode(model, mel, options)
-            print(result)
+            valid_samples = speech_count * lenght
+            if valid_samples > 0:
+                audio_segment = audio[:valid_samples].astype(np.float32) / 32768.0
+                audio_segment = whisper.pad_or_trim(audio_segment)
+                mel = whisper.log_mel_spectrogram(audio_segment).to(model.device)
+                result = whisper.decode(model, mel, options)
+                print(result)
 
             audio[:] = 0
             speech_count = 0
