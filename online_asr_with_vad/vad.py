@@ -26,18 +26,13 @@ class FrameVAD:
         threshold=0.5,
         frame_len=2,
         frame_overlap=2.5,
-        offset=10,
     ):
         """
         Args:
           threshold: If prob of speech is larger than threshold, classify the segment to be speech.
           frame_len: frame's duration, seconds
           frame_overlap: duration of overlaps before and after current frame, seconds
-          offset: number of symbols to drop for smooth streaming
         """
-
-        torch.device("cuda")
-        # torch.device('cpu')
 
         vad_model = nemo_asr.models.EncDecClassificationModel.from_pretrained(
             "vad_marblenet"
@@ -56,13 +51,9 @@ class FrameVAD:
         self.n_frame_len = int(frame_len * self.sr)
         self.frame_overlap = frame_overlap
         self.n_frame_overlap = int(frame_overlap * self.sr)
-        timestep_duration = cfg.preprocessor["window_stride"]
-        for block in cfg.encoder["jasper"]:
-            timestep_duration *= block["stride"][0] ** block["repeat"]
         self.buffer = np.zeros(
             shape=2 * self.n_frame_overlap + self.n_frame_len, dtype=np.float32
         )
-        self.offset = offset
 
         self.data_layer = AudioDataLayer(sample_rate=cfg.train_ds.sample_rate)
         self.data_loader = DataLoader(
@@ -71,7 +62,7 @@ class FrameVAD:
 
         self.reset()
 
-    def _decode(self, frame, offset=0):
+    def _decode(self, frame):
         assert len(frame) == self.n_frame_len
         self.buffer[: -self.n_frame_len] = self.buffer[self.n_frame_len :]
         self.buffer[-self.n_frame_len :] = frame
@@ -86,10 +77,6 @@ class FrameVAD:
         audio_signal, audio_signal_len = batch
         audio_signal = audio_signal.to(self.vad_model.device)
         audio_signal_len = audio_signal_len.to(self.vad_model.device)
-        processed_signal, processed_signal_len = self.vad_model.preprocessor(
-            input_signal=audio_signal,
-            length=audio_signal_len,
-        )
         logits = self.vad_model.forward(
             input_signal=audio_signal, input_signal_length=audio_signal_len
         )
@@ -101,7 +88,7 @@ class FrameVAD:
             frame = np.zeros(shape=self.n_frame_len, dtype=np.float32)
         if len(frame) < self.n_frame_len:
             frame = np.pad(frame, [0, self.n_frame_len - len(frame)], "constant")
-        unmerged = self._decode(frame, self.offset)
+        unmerged = self._decode(frame)
         return unmerged
 
     def reset(self):
@@ -109,14 +96,12 @@ class FrameVAD:
         Reset frame_history and decoder's state
         """
         self.buffer = np.zeros(shape=self.buffer.shape, dtype=np.float32)
-        self.prev_char = ""
 
     @staticmethod
     def _greedy_decoder(threshold, logits, vocab):
         s = []
         if logits.shape[0]:
             probs = torch.softmax(torch.as_tensor(logits), dim=-1)
-            probas, _ = torch.max(probs, dim=-1)
             probas_s = probs[1].item()
             preds = 1 if probas_s >= threshold else 0
             s = [
