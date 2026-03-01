@@ -18,6 +18,9 @@ from pathlib import Path
 import numpy as np
 import sounddevice as sd
 from loguru import logger
+from rich.console import Console
+from rich.live import Live
+from rich.text import Text
 
 from vad import FrameVAD
 import whisper
@@ -68,6 +71,28 @@ class AppConfig:
 
 
 DEFAULT_CONFIG_PATH = Path(__file__).with_name("config.yaml")
+
+
+def build_status_text(vad_state: str, whisper_state: str) -> Text:
+    vad_width = 7  # max(len("Silence"), len("Speech"))
+    whisper_width = 8  # max(len("Decoding"), len("Idle"))
+    vad_label = vad_state.ljust(vad_width)
+    whisper_label = whisper_state.ljust(whisper_width)
+
+    text = Text()
+    text.append("VAD | ", style="bold white")
+    text.append(
+        vad_label,
+        style="bold green" if vad_state == "Speech" else "bold yellow",
+    )
+    text.append(" |  ", style="bold white")
+    text.append("Whisper | ", style="bold white")
+    text.append(
+        whisper_label,
+        style="bold cyan" if whisper_state == "Decoding" else "bold bright_black",
+    )
+    text.append(" |", style="bold white")
+    return text
 
 
 def configure_logger(config_level: str):
@@ -174,6 +199,7 @@ async def mic_stream(config: AppConfig):
         raise ValueError("vad.window_size_sec must be >= audio.frame_step_sec")
 
     audio = np.zeros((samples_per_frame * max_history_frames), dtype=np.int16)
+    status_console = Console(file=sys.stderr)
     logger.info("Starting microphone stream")
     logger.info(
         "Parameters: sample_rate={}, channels={}, frame_step_sec={}, vad_threshold={}, "
@@ -210,100 +236,118 @@ async def mic_stream(config: AppConfig):
 
     length = samples_per_frame
 
-    async for indata, status in inputstream_generator(
-        channels=channels,
-        samplerate=samplerate,
-        chunk_size=samples_per_frame,
-        device_id=input_device_id,
-    ):
-        if status:
-            logger.error("sounddevice status: {}", status)
+    vad_state = "Silence"
+    whisper_state = "Idle"
+    with Live(build_status_text(vad_state, whisper_state), console=status_console, refresh_per_second=20) as live:
 
-        do_decode = False
+        def log_with_break(level: str, message: str, *args):
+            live.console.file.write("\n")
+            live.console.file.flush()
+            logger.log(level, message, *args)
 
-        signal = np.frombuffer(indata, dtype=np.int16)
-        try:
-            text = vad.transcribe(signal)
-        except Exception as exc:
-            logger.error("VAD error: {}", exc)
-            continue
+        async for indata, status in inputstream_generator(
+            channels=channels,
+            samplerate=samplerate,
+            chunk_size=samples_per_frame,
+            device_id=input_device_id,
+        ):
+            if status:
+                log_with_break("ERROR", "sounddevice status: {}", status)
 
-        if not text:
-            logger.warning("Empty VAD output. Skip this frame.")
-            continue
+            do_decode = False
 
-        # copy to buffer
-        write_index = min(speech_count, max_history_frames - 1)
-        audio[write_index * length : (write_index + 1) * length] = signal
+            signal = np.frombuffer(indata, dtype=np.int16)
+            try:
+                text = vad.transcribe(signal)
+            except Exception as exc:
+                log_with_break("ERROR", "VAD error: {}", exc)
+                continue
 
-        logger.debug(
-            "VAD result={}, speech_count={}, history_len={}",
-            text[0],
-            speech_count,
-            len(speech_histories),
-        )
-        speech_histories.append(text[0])
-        if len(speech_histories) > check_history:
-            del speech_histories[0]
-        history_len = len(speech_histories)
-        speech_count_in_history = speech_histories.count(1)
-        background_count_in_history = speech_histories.count(0)
-        required_speech_count = math.ceil(history_len * speech_ratio_threshold)
-        required_background_count = math.ceil(history_len * background_ratio_threshold)
+            if not text:
+                log_with_break("WARNING", "Empty VAD output. Skip this frame.")
+                continue
 
-        # Speaking and 30 seconds have passed
-        if is_speech and speech_count >= max_history_frames:
-            logger.warning("Speaking and {:.2f} seconds have passed", max_segment_sec)
-            do_decode = True
+            # copy to buffer
+            write_index = min(speech_count, max_history_frames - 1)
+            audio[write_index * length : (write_index + 1) * length] = signal
 
-        # speech
-        elif text[0] == 1:
-            speech_count += 1
+            log_with_break(
+                "DEBUG",
+                "VAD result={}, speech_count={}, history_len={}",
+                text[0],
+                speech_count,
+                len(speech_histories),
+            )
+            speech_histories.append(text[0])
+            if len(speech_histories) > check_history:
+                del speech_histories[0]
+            history_len = len(speech_histories)
+            speech_count_in_history = speech_histories.count(1)
+            background_count_in_history = speech_histories.count(0)
+            required_speech_count = math.ceil(history_len * speech_ratio_threshold)
+            required_background_count = math.ceil(history_len * background_ratio_threshold)
+            vad_state = "Speech" if text[0] == 1 else "Silence"
+            live.update(build_status_text(vad_state, whisper_state), refresh=True)
 
-            if (
-                not is_speech
-                and history_len >= min_history_for_decision
-                and speech_count_in_history >= required_speech_count
-            ):
-                is_speech = True
-                logger.debug(
-                    "Detect speech {} / {}",
-                    speech_count_in_history,
-                    history_len,
-                )
+            # Speaking and 30 seconds have passed
+            if is_speech and speech_count >= max_history_frames:
+                log_with_break("WARNING", "Speaking and {:.2f} seconds have passed", max_segment_sec)
+                do_decode = True
 
-        # background
-        else:
-            if history_len >= min_history_for_decision and background_count_in_history >= required_background_count:
-                if is_speech:
-                    logger.debug(
-                        "Detect background and transcribe. {} / {}",
-                        background_count_in_history,
+            # speech
+            elif text[0] == 1:
+                speech_count += 1
+
+                if (
+                    not is_speech
+                    and history_len >= min_history_for_decision
+                    and speech_count_in_history >= required_speech_count
+                ):
+                    is_speech = True
+                    log_with_break(
+                        "DEBUG",
+                        "Detect speech {} / {}",
+                        speech_count_in_history,
                         history_len,
                     )
 
-                    do_decode = True
-                    speech_count += 1
-                else:
-                    audio[:] = 0
-                    speech_count = 0
+            # background
+            else:
+                if history_len >= min_history_for_decision and background_count_in_history >= required_background_count:
+                    if is_speech:
+                        log_with_break(
+                            "DEBUG",
+                            "Detect background and transcribe. {} / {}",
+                            background_count_in_history,
+                            history_len,
+                        )
 
-                is_speech = False
+                        do_decode = True
+                        speech_count += 1
+                    else:
+                        audio[:] = 0
+                        speech_count = 0
 
-        if do_decode:
-            valid_samples = speech_count * length
-            if valid_samples > 0:
-                audio_segment = audio[:valid_samples].astype(np.float32) / 32768.0
-                audio_segment = whisper.pad_or_trim(audio_segment)
-                mel = whisper.log_mel_spectrogram(audio_segment).to(model.device)
-                try:
-                    result = whisper.decode(model, mel, options)
-                    logger.info("Recognized text: {}", result.text)
-                except Exception as exc:
-                    logger.error("Whisper decode error: {}", exc)
+                    is_speech = False
 
-            audio[:] = 0
-            speech_count = 0
+            if do_decode:
+                whisper_state = "Decoding"
+                live.update(build_status_text(vad_state, whisper_state), refresh=True)
+                valid_samples = speech_count * length
+                if valid_samples > 0:
+                    audio_segment = audio[:valid_samples].astype(np.float32) / 32768.0
+                    audio_segment = whisper.pad_or_trim(audio_segment)
+                    mel = whisper.log_mel_spectrogram(audio_segment).to(model.device)
+                    try:
+                        result = whisper.decode(model, mel, options)
+                        log_with_break("INFO", "Recognized text: {}", result.text)
+                    except Exception as exc:
+                        log_with_break("ERROR", "Whisper decode error: {}", exc)
+
+                audio[:] = 0
+                speech_count = 0
+                whisper_state = "Idle"
+                live.update(build_status_text(vad_state, whisper_state), refresh=True)
 
 
 async def main(config_path: Path):
