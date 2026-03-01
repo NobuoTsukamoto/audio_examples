@@ -22,6 +22,7 @@ This design reduces device load by avoiding continuous Whisper decoding.
 - `online_asr_with_vad/data_loader.py`: Minimal data layer for NeMo inference
 - `online_asr_with_vad/config.yaml`: Runtime configuration (YAML)
 - `doc/configuration.md`: Configuration specification
+- `pyproject.toml`: Dependency definition for `uv`/PEP 621
 - `utils/sound_device_list.py`: Print available audio input/output devices
 - `Dockerfile`: Example runtime environment
 
@@ -55,6 +56,19 @@ pip install loguru
 ```
 
 Install equivalent OS-level audio packages for your platform as needed.
+
+### Local environment with uv
+
+```bash
+uv venv
+uv sync
+```
+
+Run commands inside the environment with:
+
+```bash
+uv run python online_asr_with_vad/online_asr_with_vad.py
+```
 
 ## Run
 
