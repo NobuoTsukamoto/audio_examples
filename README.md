@@ -11,7 +11,7 @@ The main implementation is `online_asr_with_vad`.
 2. Run frame-level VAD with NeMo `vad_marblenet`.
 3. Keep buffering audio while speech is active.
 4. Run Whisper only when speech ends (or after max segment length).
-5. Print the recognition result to stdout.
+5. Log the recognition result to stdout.
 
 This design reduces device load by avoiding continuous Whisper decoding.
 
@@ -30,6 +30,7 @@ This design reduces device load by avoiding continuous Whisper decoding.
 - NVIDIA NeMo
 - OpenAI Whisper (`openai/whisper`)
 - `sounddevice`
+- `loguru`
 - OS packages used by this project: `sox`, `libsndfile1`, `ffmpeg`, `portaudio19-dev`
 
 The provided `Dockerfile` uses `nvcr.io/nvidia/nemo:23.03` and installs the rest.
@@ -48,6 +49,7 @@ docker build -t audio-examples .
 pip install nemo_toolkit
 pip install git+https://github.com/openai/whisper.git
 pip install sounddevice
+pip install loguru
 ```
 
 Install equivalent OS-level audio packages for your platform as needed.
@@ -97,7 +99,7 @@ If needed, change `device=0` in `online_asr_with_vad.py`.
 
 - VAD + Whisper execution is local/on-device, but initial model download requires network.
 - Parameters are not exposed as CLI options yet; tuning is done by editing source.
-- Output is printed to stdout only (no file persistence/API layer yet).
+- Output is logged to stdout only (no file persistence/API layer yet).
 
 ## References
 
