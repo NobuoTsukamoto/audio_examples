@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 
 """
-    Copyright (c) 2023 Nobuo Tsukamoto
-    This software is released under the MIT License.
-    See the LICENSE file in the project root for more information.
+Copyright (c) 2023 Nobuo Tsukamoto
+This software is released under the MIT License.
+See the LICENSE file in the project root for more information.
 """
 
 import copy
@@ -26,6 +26,7 @@ class FrameVAD:
         threshold=0.5,
         frame_len=2,
         frame_overlap=2.5,
+        model_name="vad_marblenet",
     ):
         """
         Args:
@@ -34,9 +35,7 @@ class FrameVAD:
           frame_overlap: duration of overlaps before and after current frame, seconds
         """
 
-        vad_model = nemo_asr.models.EncDecClassificationModel.from_pretrained(
-            "vad_marblenet"
-        )
+        vad_model = nemo_asr.models.EncDecClassificationModel.from_pretrained(model_name)
         cfg = copy.deepcopy(vad_model._cfg)
         vad_model.preprocessor = vad_model.from_config_dict(cfg.preprocessor)
         vad_model.eval()  # Set model to inference mode
@@ -51,14 +50,10 @@ class FrameVAD:
         self.n_frame_len = int(frame_len * self.sr)
         self.frame_overlap = frame_overlap
         self.n_frame_overlap = int(frame_overlap * self.sr)
-        self.buffer = np.zeros(
-            shape=2 * self.n_frame_overlap + self.n_frame_len, dtype=np.float32
-        )
+        self.buffer = np.zeros(shape=2 * self.n_frame_overlap + self.n_frame_len, dtype=np.float32)
 
         self.data_layer = AudioDataLayer(sample_rate=cfg.train_ds.sample_rate)
-        self.data_loader = DataLoader(
-            self.data_layer, batch_size=1, collate_fn=self.data_layer.collate_fn
-        )
+        self.data_loader = DataLoader(self.data_layer, batch_size=1, collate_fn=self.data_layer.collate_fn)
 
         self.reset()
 
@@ -77,9 +72,7 @@ class FrameVAD:
         audio_signal, audio_signal_len = batch
         audio_signal = audio_signal.to(self.vad_model.device)
         audio_signal_len = audio_signal_len.to(self.vad_model.device)
-        logits = self.vad_model.forward(
-            input_signal=audio_signal, input_signal_length=audio_signal_len
-        )
+        logits = self.vad_model.forward(input_signal=audio_signal, input_signal_length=audio_signal_len)
         return logits.cpu().numpy()[0]
 
     @torch.no_grad()

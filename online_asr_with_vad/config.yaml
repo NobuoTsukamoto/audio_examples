@@ -1,0 +1,48 @@
+# Runtime configuration for online_asr_with_vad.py
+audio:
+  # Input device index from `python utils/sound_device_list.py`
+  # Use a valid input-capable device id.
+  input_device_id: 0
+  # Microphone sample rate (Hz)
+  # Must match your input device capability.
+  sample_rate: 16000
+  # Number of input channels
+  # Usually 1 for microphone.
+  channels: 1
+  # Frame interval for streaming/VAD (seconds)
+  # Must satisfy int(sample_rate * frame_step_sec) >= 1.
+  frame_step_sec: 0.01
+
+vad:
+  # NeMo VAD pretrained model name
+  model_name: vad_marblenet
+  # Analysis window size (seconds), must be >= frame_step_sec
+  window_size_sec: 0.31
+  # Speech probability threshold
+  # Valid range: 0.0 to 1.0.
+  threshold: 0.5
+  # Rolling history size used for state decision (frames)
+  # Should be >= min_history_for_decision_frames.
+  check_history_frames: 200
+  # Minimum history before applying ratio-based decision (frames)
+  min_history_for_decision_frames: 20
+  # Enter-speech ratio threshold
+  # Valid range: 0.0 to 1.0.
+  speech_ratio_threshold: 0.8
+  # Exit-speech ratio threshold
+  # Valid range: 0.0 to 1.0.
+  background_ratio_threshold: 0.4
+
+segment:
+  # Max buffered frames before forced decode
+  # max_segment_sec is derived as: max_history_frames * frame_step_sec.
+  max_history_frames: 3000
+
+whisper:
+  # Whisper model name
+  model_name: base
+
+logging:
+  # Log level for loguru (DEBUG, INFO, WARNING, ERROR)
+  # Can be overridden by environment variable LOG_LEVEL.
+  level: INFO

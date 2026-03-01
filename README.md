@@ -20,6 +20,8 @@ This design reduces device load by avoiding continuous Whisper decoding.
 - `online_asr_with_vad/online_asr_with_vad.py`: Main loop (mic input, VAD logic, Whisper trigger)
 - `online_asr_with_vad/vad.py`: Frame VAD wrapper using NeMo pretrained model
 - `online_asr_with_vad/data_loader.py`: Minimal data layer for NeMo inference
+- `online_asr_with_vad/config.yaml`: Runtime configuration (YAML)
+- `doc/configuration.md`: Configuration specification
 - `utils/sound_device_list.py`: Print available audio input/output devices
 - `Dockerfile`: Example runtime environment
 
@@ -60,6 +62,12 @@ Install equivalent OS-level audio packages for your platform as needed.
 python online_asr_with_vad/online_asr_with_vad.py
 ```
 
+Use a custom config file:
+
+```bash
+python online_asr_with_vad/online_asr_with_vad.py --config online_asr_with_vad/config.yaml
+```
+
 At first run, pretrained models are downloaded:
 
 - Whisper `base`
@@ -67,19 +75,11 @@ At first run, pretrained models are downloaded:
 
 After that, inference is local/on-device.
 
-## Current Runtime Parameters
+## Configuration
 
-These are hardcoded in `mic_stream()` in `online_asr_with_vad.py`:
-
-- Sample rate: `16000`
-- Channels: `1`
-- Frame step: `0.01` sec (10 ms)
-- VAD threshold: `0.5`
-- History window: `check_history = 200` (~2 sec)
-- Speech start condition: speech ratio > `80%`
-- Speech end condition: background ratio > `40%`
-- Max utterance length before forced decode: `30` sec (`max_history = 3000`)
-- Whisper model: `base`
+- Runtime parameters are defined in `online_asr_with_vad/config.yaml`.
+- Full schema and parameter definitions: [doc/configuration.md](doc/configuration.md)
+- Log level can be set with `logging.level` in YAML (or overridden by `LOG_LEVEL` env var).
 
 ## Audio Device Selection
 
@@ -89,16 +89,12 @@ List devices:
 python utils/sound_device_list.py
 ```
 
-The main script currently uses a fixed device:
-
-- `sounddevice.InputStream(..., device=0)`
-
-If needed, change `device=0` in `online_asr_with_vad.py`.
+The main script uses `audio.input_device_id` in `online_asr_with_vad/config.yaml`.
 
 ## Notes and Limitations
 
 - VAD + Whisper execution is local/on-device, but initial model download requires network.
-- Parameters are not exposed as CLI options yet; tuning is done by editing source.
+- Main tuning parameters are managed via YAML config.
 - Output is logged to stdout only (no file persistence/API layer yet).
 
 ## References
