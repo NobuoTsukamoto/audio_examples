@@ -68,8 +68,9 @@ async def mic_stream():
     audio = np.zeros((160 * max_history), dtype=np.int16)
     logger.info("Starting microphone stream")
     logger.info(
-        "Parameters: sample_rate={}, channels={}, step={}, vad_threshold={}, check_history={}, "
-        "speech_ratio_threshold={}, background_ratio_threshold={}, max_history={}, whisper_model={}",
+        "Parameters: sample_rate={}, channels={}, step={}, vad_threshold={}, "
+        "check_history={}, speech_ratio_threshold={}, background_ratio_threshold={}, "
+        "max_history={}, whisper_model={}",
         samplerate,
         channels,
         step,
