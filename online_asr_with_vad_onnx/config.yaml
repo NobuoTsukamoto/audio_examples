@@ -1,0 +1,35 @@
+# Runtime configuration for online_asr_with_vad_onnx.py
+audio:
+  # Input device index from `python ../utils/sound_device_list.py`
+  input_device_id: 0
+  sample_rate: 16000
+  channels: 1
+  # Silero ONNX VAD commonly uses 512 samples for 16kHz (=0.032s).
+  frame_step_sec: 0.032
+
+vad:
+  # Local path to silero ONNX VAD model file.
+  onnx_model_path: ./models/silero_vad.onnx
+  # Analysis window size (seconds), must be >= frame_step_sec
+  window_size_sec: 0.032
+  # Speech probability threshold
+  threshold: 0.5
+  check_history_frames: 60
+  min_history_for_decision_frames: 8
+  speech_ratio_threshold: 0.6
+  background_ratio_threshold: 0.6
+
+segment:
+  # max segment duration = max_history_frames * frame_step_sec
+  max_history_frames: 900
+
+asr:
+  # Local directory to ONNX Runtime GenAI Whisper model assets.
+  model_path: ./models/whisper
+  execution_provider: cpu
+  max_length: 448
+  num_beams: 1
+  prompt: <|startoftranscript|><|en|><|transcribe|><|notimestamps|>
+
+logging:
+  level: INFO
